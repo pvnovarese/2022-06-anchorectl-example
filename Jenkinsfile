@@ -66,6 +66,15 @@ pipeline {
           which anchore-cli
           which anchorectl
           """
+          //
+          // if tools need to be installed, something like:
+          // sudo apt-get install python3-pip
+          // pip install anchorecli
+          // mkdir -p $HOME/.local/bin
+          // curl https://anchorectl-releases.s3-us-west-2.amazonaws.com/v0.2.0/anchorectl_0.2.0_linux_amd64.tar.gz | tar xzvf - -C $HOME/.local/bin/
+          // chmod 0755 $HOME/.local/bin/anchorectl
+          // export PATH="$HOME/.local/bin/:$PATH"
+          //
       } // end steps
     } // end stage "Verify Tools"
     
@@ -79,13 +88,8 @@ pipeline {
           sh """
             docker login -u ${DOCKER_HUB_USR} -p ${DOCKER_HUB_PSW}
             docker build -t ${REPOSITORY}:${TAG} --pull -f ./Dockerfile .
-            # we don't need to push since we're using anchorectl, but if you wanted to you could do this:
-            # docker push ${REPOSITORY}:${TAG}
+            docker push ${REPOSITORY}:${TAG}
           """
-          // I don't like using the docker plugin but if you want to use it, here ya go
-          // DOCKER_IMAGE = docker.build REPOSITORY + ":" + TAG
-          // docker.withRegistry( '', HUB_CREDENTIAL ) { 
-          //  DOCKER_IMAGE.push() 
           // }
         } // end script
       } // end steps
@@ -94,25 +98,29 @@ pipeline {
     stage('Analyze Image w/ anchorectl') {
       steps {
         script {
-          // first, create the local json SBOM to be archived, then
-          // analyze with anchorectl and upload sbom to anchore enterprise
+          // tell anchore enterprise to analyze the image and then wait
+          // for analysis to complete
           sh '''
-            anchorectl -o json sbom create ${REPOSITORY}:${TAG} > ${JOB_BASE_NAME}.json
-            anchorectl sbom upload --wait ${REPOSITORY}:${TAG}
+            anchorectl image add ${REPOSITORY}:${TAG}
+            anchorectl image wait ${REPOSITORY}:${TAG}
           '''
-          // sh '/usr/bin/anchore-cli --url ${ANCHORE_URL} --u ${ANCHORE_USR} --p ${ANCHORE_PSW} image wait --timeout 120 --interval 2 ${REPOSITORY}:${BUILD_NUMBER}'
-          // 
-          // (note - at this point the image has not been pushed anywhere)
+          // you can use anchore-cli or anchorectl for the "image add" and "image wait" steps.
           //
-          // we do the "image wait" to wait for analysis to complete (even though we generated the sbom locally, 
-          // the backend analyzer still has some work to do - it validates the uploaded sbom and inserts it into 
-          // the catalog, plus it will do an initial policy evaluation etc.
+          // if you want to analyze the image locally, use "sbom create" (anchorectl only):
+          // sh '''
+          //   anchorectl -o json sbom create ${REPOSITORY}:${TAG} > ${JOB_BASE_NAME}.json
+          //   anchorectl sbom upload --wait ${REPOSITORY}:${TAG}
+          // '''
           // 
           // now let's get the evaluation
           //
           try {
             sh 'anchore-cli evaluate check ${REPOSITORY}:${TAG}'
             // if you want the FULL details of the policy evaluation (which can be quite long), use "evaluate check --detail" instead
+            //
+            // note that anchorectl doesn't have "evaluate check" implemented as of 0.2.0 so we still need anchore-cli
+            //
+            // if you need the output in json format, use "anchore-cli --json ..."
             //
           } catch (err) {
             // if evaluation fails, clean up (delete the image) and fail the build
@@ -124,7 +132,6 @@ pipeline {
               # plug-in automatically does an "image add" which fails.
               exit 1
             """
-            // anchore name: 'anchore_images'
           } // end try
         } // end script 
       } // end steps
