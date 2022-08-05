@@ -20,9 +20,6 @@ jobs:
       ANCHORECTL_ANCHORE_USER: ${{ secrets.ANCHORE_CLI_USER }}
       ANCHORECTL_ANCHORE_PASSWORD: ${{ secrets.ANCHORE_CLI_PASS }}
       ANCHORECTL_ANCHORE_URL: ${{ secrets.ANCHORECTL_ANCHORE_URL }}
-      ANCHORE_CLI_USER: ${{ secrets.ANCHORE_CLI_USER }}
-      ANCHORE_CLI_PASS: ${{ secrets.ANCHORE_CLI_PASS }}
-      ANCHORE_CLI_URL: ${{ secrets.ANCHORE_CLI_URL }}
       IMAGE_REGISTRY: ghcr.io
     steps:
     
