@@ -1,7 +1,7 @@
 # This workflow checks out code, builds an image, performs a 
 # container image scan, all using only anchorectl
 
-name: Anchore Enterprise with anchorectl
+name: Only anchorectl
 
 on: 
   #push:
