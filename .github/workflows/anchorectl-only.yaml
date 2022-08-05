@@ -1,0 +1,115 @@
+# This workflow checks out code, builds an image, performs a 
+# container image scan, all using only anchorectl
+
+name: Anchore Enterprise with anchorectl
+
+on: 
+  #push:
+  #  branches:
+  #    - main
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Manual Build'  
+        
+jobs:
+
+  Build-Scan-Promote:
+    runs-on: ubuntu-latest
+    env:
+      ANCHORECTL_ANCHORE_USER: ${{ secrets.ANCHORE_CLI_USER }}
+      ANCHORECTL_ANCHORE_PASSWORD: ${{ secrets.ANCHORE_CLI_PASS }}
+      ANCHORECTL_ANCHORE_URL: ${{ secrets.ANCHORECTL_ANCHORE_URL }}
+      ANCHORE_CLI_USER: ${{ secrets.ANCHORE_CLI_USER }}
+      ANCHORE_CLI_PASS: ${{ secrets.ANCHORE_CLI_PASS }}
+      ANCHORE_CLI_URL: ${{ secrets.ANCHORE_CLI_URL }}
+      IMAGE_REGISTRY: ghcr.io
+    steps:
+    
+    # we'll use the tag with the SHA for testing, once we are satisfied we'll use the tag with the
+    # branch name and then actually push that to the registry (the SHA tag never gets pushed)
+    - name: "Set environmental variables"
+      run: |
+        echo "IMAGE_SHA=${IMAGE_REGISTRY}/${GITHUB_REPOSITORY}:${GITHUB_SHA}" >> $GITHUB_ENV
+        echo "IMAGE=${IMAGE_REGISTRY}/${GITHUB_REPOSITORY}:${GITHUB_REF_NAME}" >> $GITHUB_ENV
+        
+    - name: Checkout Code
+      uses: actions/checkout@v2
+      
+    - name: Build Docker Image
+      run: |
+        docker build . --file Dockerfile --tag ${IMAGE_SHA}      
+                
+    - name: Install anchorectl CLI Tool
+      run: |
+        mkdir -p $HOME/.local/bin
+        curl https://anchorectl-releases.s3-us-west-2.amazonaws.com/v0.2.0/anchorectl_0.2.0_linux_amd64.tar.gz | tar xzvf - -C $HOME/.local/bin/
+        chmod 0755 $HOME/.local/bin/anchorectl
+        export PATH="$HOME/.local/bin/:$PATH"
+        
+    - name: Verify Anchore Ready and Reachable
+      run: |
+        anchorectl system wait
+        anchorectl system status
+        
+    - name: Generate SBOM and Push to Anchore
+      run: |
+        anchorectl sbom upload --overwrite --wait --dockerfile ./Dockerfile ${IMAGE_SHA}
+
+    ### this isn't really necessary, some people want to archive this stuff
+    - name: Pull Vulnerability List
+      run: |
+        anchorectl image vuln ${IMAGE_SHA} all | tee anchore-vuln.txt
+    
+    ### pulling policy evaluation is not implemented in anchorectl as of v0.2.0 but will be in 
+    ### the next release via "anchorectl image check ${IMAGE}"
+    ### if you need this functionality now, here's how to do it with anchore-cli
+    #- name: Install anchore-cli
+    #  run: |
+    #    sudo apt-get install python3-pip
+    #    pip install anchorecli
+    #    export PATH="$HOME/.local/bin/:$PATH"
+    #- name: Pull Policy Evaluation
+    #  run: |
+    #    set -o pipefail
+    #    # we have to set pipefail so that we can still gate on the evaluation, otherwise piping into tee will mask the failure
+    #    # also note that for this step we use anchore-cli, anchorectl doesn't yet have "evaluate check" implemented as of 0.1.4
+    #    anchore-cli evaluate check --detail ${IMAGE_SHA} | tee anchore-policy.txt
+
+    - name: Re-Tag Image
+      run: |
+        docker tag ${IMAGE_SHA} ${IMAGE}
+
+    - name: Login to ghcr.io
+      run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${GITHUB_ACTOR} --password-stdin
+      
+    - name: Push Docker Image
+      run: |
+        docker push ${IMAGE}
+        
+    - name: Add Promoted Image to Anchore Queue
+      run: |
+        anchorectl image add --noautosubscribe ${IMAGE}
+        ### image wait isn't really necessary
+        #anchorectl image wait ${IMAGE}
+
+    ### if you want to clean up, you need anchore-cli for now since subscription operations are 
+    ### also not implemented in anchorectl yet as of v0.2.0
+    #- name: Purge Unneeded Evaluation
+    #  run: |
+    #    anchore-cli subscription list --full | grep ${GITHUB_SHA} | awk '{print $4}' | xargs -n 1 anchore-cli subscription del
+    #    anchorectl image delete ${IMAGE_SHA}
+    
+    ## optional, if you want continuous re-evaluations
+    ## still need anchore-cli for subscription operations
+    #- name: Activate Subscriptions
+    #    anchore-cli subscription activate policy_eval ${IMAGE}
+    #    anchore-cli subscription activate vuln_update ${IMAGE}    
+        
+    - name: Archive Vulnerabilities and Evaluation
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: evaluation-report
+        path: anchore-*.txt
+        retention-days: 14
