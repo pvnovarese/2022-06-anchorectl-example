@@ -1,7 +1,7 @@
 # This workflow checks out code, builds an image, performs a container image
 # scan, evaluates the image, and promotes it if it passes.
 
-name: Anchore Enterprise with anchorectl
+name: Scan and Evaluate with anchorectl
 
 on: 
   #push:
