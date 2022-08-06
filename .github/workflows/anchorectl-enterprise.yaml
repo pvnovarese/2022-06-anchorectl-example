@@ -45,23 +45,26 @@ jobs:
         tags: ${{ env.IMAGE_SHA }}
         push: false
         load: true
-        
-    - name: Scan image
-      uses: anchore/scan-action@v3
-      id: scan
-      with:
-        image: ${{ env.IMAGE_SHA }}
-        fail-build: false
-        severity-cutoff: critical
-        acs-report-enable: true
-        
-    - name: Inspect SARIF report
-      run: cat ${{ steps.scan.outputs.sarif }}
-
-    - name: Upload Anchore scan SARIF report
-      uses: github/codeql-action/upload-sarif@v2
-      with:
-        sarif_file: ${{ steps.scan.outputs.sarif }}
+     
+    ### Uncomment this section if you want to use the grype scan action
+    ### (this seems unnecessary since we're going to pull a vuln report)
+    #
+    #- name: Scan image
+    #  uses: anchore/scan-action@v3
+    #  id: scan
+    #  with:
+    #    image: ${{ env.IMAGE_SHA }}
+    #    fail-build: false
+    #    severity-cutoff: critical
+    #    acs-report-enable: true
+    #    
+    #- name: Inspect SARIF report
+    #  run: cat ${{ steps.scan.outputs.sarif }}
+    #
+    #- name: Upload Anchore scan SARIF report
+    #  uses: github/codeql-action/upload-sarif@v2
+    #  with:
+    #    sarif_file: ${{ steps.scan.outputs.sarif }}
                 
     - name: Install Anchore CLI Tools
       run: |
@@ -83,11 +86,12 @@ jobs:
     - name: Pull Vulnerability List
       run: |
         anchorectl image vuln ${IMAGE_SHA} all | tee anchore-vuln.txt
+        
     - name: Pull Policy Evaluation
       run: |
         set -o pipefail
         # we have to set pipefail so that we can still gate on the evaluation, otherwise piping into tee will mask the failure
-        # also note that for this step we use anchore-cli, anchorectl doesn't yet have "evaluate check" implemented as of 0.1.4
+        # also note that for this step we use anchore-cli, anchorectl doesn't yet have "evaluate check" implemented as of 0.2.0
         anchore-cli evaluate check --detail ${IMAGE_SHA} | tee anchore-policy.txt
 
     - name: Re-Tag Image
